@@ -1,0 +1,92 @@
+import codecs
+import threading
+import json
+import random
+import os
+from web3 import Web3, Account
+
+# 全局变量
+found_count = 0
+print_lock = threading.Lock()
+progress_lock = threading.Lock()
+threads = []
+is_running = True
+
+# 将整数转换为私钥
+def int_to_private_key(num):
+    return codecs.encode(num.to_bytes(32, 'big'), 'hex').decode()
+
+# 将私钥转换为地址
+def private_key_to_address(private_key):
+    return Account.from_key(private_key).address
+
+# 处理私钥的函数
+def process_keys(start_private_key, end_private_key, addresses_set, output_file, progress_file, thread_id, display_interval):
+    global found_count, is_running
+    count = 0
+    processed_keys = set()
+
+    while is_running and count < (end_private_key - start_private_key):
+        num = random.randint(start_private_key, end_private_key)
+        
+        # 检查是否已处理过此私钥
+        if num in processed_keys:
+            continue
+        
+        processed_keys.add(num)
+        private_key = int_to_private_key(num)
+        address = private_key_to_address(private_key)
+        count += 1
+
+        if address in addresses_set:
+            with print_lock:
+                found_count += 1
+                print(f"线程 {thread_id}: 找到匹配地址 {address} 对应的私钥 {private_key}")
+                with open(output_file, 'a') as f_output:
+                    f_output.write(json.dumps({'private_key': private_key, 'address': address}) + '\n')
+
+        if count % display_interval == 0:
+            with print_lock:
+                print(f"线程 {thread_id}: 已处理 {count} 个私钥，当前私钥 {private_key}，地址 {address}，已找到 {found_count}")
+        
+        # 保存进度
+        if count % 10000 == 0:
+            with progress_lock:
+                with open(progress_file, 'w') as f_progress:
+                    f_progress.write(str(num) + '\n')
+
+# 主函数
+def main():
+    global is_running
+
+    # 配置参数
+    start_private_key = 0x1
+    end_private_key = 0x79f246e254ca04941daf2bc9431808ec11303fbdf1564dc3285176b49bae950c
+    Tron_ETH_privete_key='12f21cd19d2fd63dbbef09c569dabee5e0deab2c6fd7d7a38700d93447191dc8'
+    num_threads = 4
+    display_interval = 10000
+    addresses_file = 'addresses.txt'
+    output_file = 'found_keys.txt'
+    progress_file = 'progress.txt'
+
+    # 加载地址集合
+    with open(addresses_file, 'r') as f:
+        addresses_set = set(f.read().splitlines())
+
+    for i in range(num_threads):
+        thread = threading.Thread(target=process_keys, args=(start_private_key, end_private_key, addresses_set, output_file, progress_file, i, display_interval))
+        threads.append(thread)
+        thread.start()
+
+    try:
+        for thread in threads:
+            thread.join()
+    except KeyboardInterrupt:
+        print("程序暂停，正在保存进度...")
+        is_running = False
+        for thread in threads:
+            thread.join()
+        print("进度已保存。")
+
+if __name__ == "__main__":
+    main()
